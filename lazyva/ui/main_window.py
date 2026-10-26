@@ -1,16 +1,12 @@
-"""
-Modern Dark SaaS Dashboard GUI for LazyVA.
-Built with CustomTkinter for high-DPI scaling, smooth dark mode, and sleek aesthetics.
-"""
+"""Calm, pastel desktop interface for LazyVA."""
 
-import os
-import sys
 import threading
 import time
 from pathlib import Path
 from typing import Callable, Optional
 
 import customtkinter as ctk
+import tkinter as tk
 from PIL import Image
 
 from lazyva import __app_name__, __version__
@@ -19,14 +15,20 @@ from lazyva.core.engine import ActivityEngine
 
 from lazyva.core.scheduler import SchedulerState
 from lazyva.licensing.manager import LicenseManager, LicenseTier
-from .theme import THEME, sys_is_windows
+from .theme import (
+    DISPLAY_FONT_FAMILY,
+    FONT_FAMILY,
+    RADIUS,
+    SPACE,
+    THEME,
+    resolve_color,
+)
 
 
 
 
 
 # Configure CustomTkinter defaults
-ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 
@@ -40,6 +42,7 @@ class MainWindow(ctk.CTk):
         config: ConfigManager,
         on_request_hide: Optional[Callable[[], None]] = None,
         on_request_quit: Optional[Callable[[], None]] = None,
+        on_theme_change: Optional[Callable[[], None]] = None,
     ):
         super().__init__()
 
@@ -48,11 +51,19 @@ class MainWindow(ctk.CTk):
         self.config = config
         self.on_request_hide = on_request_hide
         self.on_request_quit = on_request_quit
+        self.on_theme_change = on_theme_change
 
-        # Window Setup
-        self.title(f"{__app_name__} — Modern Workspace Assistant v{__version__}")
-        self.geometry("960x640")
-        self.minsize(900, 600)
+        appearance = self.config.get("theme", "system")
+        if appearance not in {"system", "day", "night"}:
+            appearance = "system"
+        self.config.set("theme", appearance, auto_save=False)
+        ctk.set_appearance_mode(
+            {"system": "system", "day": "light", "night": "dark"}[appearance]
+        )
+
+        self.title(f"{__app_name__} — a little room to breathe")
+        self.geometry("720x560")
+        self.minsize(640, 520)
         self.configure(fg_color=THEME["bg_dark"])
 
         # Set Icon
@@ -80,7 +91,8 @@ class MainWindow(ctk.CTk):
     def _set_app_icon(self) -> None:
         """Sets window and taskbar icon."""
         try:
-            icon_path = Path(__file__).resolve().parent.parent.parent / "assets" / "icon.png"
+            icon_name = "icon_night.png" if self.current_theme() == "night" else "icon.png"
+            icon_path = Path(__file__).resolve().parent.parent.parent / "assets" / icon_name
             if icon_path.exists():
                 icon_img = Image.open(icon_path)
                 # Tkinter photo image
@@ -92,102 +104,88 @@ class MainWindow(ctk.CTk):
             print(f"[LazyVA] Error setting window icon: {e}")
 
     def _build_sidebar(self) -> None:
-        """Constructs the left-hand navigation sidebar."""
-        self.sidebar_frame = ctk.CTkFrame(
-            self,
-            width=220,
-            corner_radius=0,
-            fg_color=THEME["surface"],
+        """Builds the compact header and pill-shaped view navigation."""
+        header = ctk.CTkFrame(self, fg_color="transparent", height=56)
+        header.pack(fill="x", padx=SPACE["lg"], pady=(SPACE["sm"], 0))
+        header.pack_propagate(False)
+
+        brand = ctk.CTkFrame(header, fg_color="transparent")
+        brand.pack(side="left", fill="y")
+        ctk.CTkLabel(
+            brand,
+            text=__app_name__,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=22, weight="bold"),
+            text_color=THEME["text_primary"],
+        ).pack(anchor="w", pady=(5, 0))
+        ctk.CTkLabel(
+            brand,
+            text=f"Rest, rhythm, and a little breathing room · v{__version__}",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+            text_color=THEME["text_secondary"],
+        ).pack(anchor="w")
+
+        actions = ctk.CTkFrame(header, fg_color="transparent")
+        actions.pack(side="right", fill="y")
+        self.theme_toggle_btn = ctk.CTkButton(
+            actions,
+            text="",
+            width=150,
+            height=34,
+            corner_radius=RADIUS["pill"],
             border_width=1,
             border_color=THEME["surface_border"],
-        )
-        self.sidebar_frame.pack(side="left", fill="y")
-        self.sidebar_frame.pack_propagate(False)
-
-        # App Brand Header
-        header_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
-        header_frame.pack(fill="x", padx=18, pady=(22, 16))
-
-        title_lbl = ctk.CTkLabel(
-            header_frame,
-            text=__app_name__,
-            font=ctk.CTkFont(size=22, weight="bold"),
+            fg_color=THEME["surface"],
+            hover_color=THEME["surface_elevated"],
             text_color=THEME["text_primary"],
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+            command=self.toggle_theme,
         )
-        title_lbl.pack(anchor="w")
+        self.theme_toggle_btn.pack(side="right", padx=(SPACE["sm"], 0), pady=10)
 
-        version_badge = ctk.CTkLabel(
-            header_frame,
-            text=f"v{__version__} • Windows SaaS",
-            font=ctk.CTkFont(size=11),
-            text_color=THEME["accent_cyan"],
+        self.header_status = ctk.CTkLabel(
+            actions,
+            text="○ Resting",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+            text_color=THEME["text_secondary"],
         )
-        version_badge.pack(anchor="w")
+        self.header_status.pack(side="right", pady=10)
+        self._update_theme_button()
 
-        # Separator line
-        sep = ctk.CTkFrame(self.sidebar_frame, height=1, fg_color=THEME["surface_border"])
-        sep.pack(fill="x", padx=18, pady=(0, 16))
-
-        # Nav Buttons
+        nav_frame = ctk.CTkFrame(self, fg_color="transparent")
+        nav_frame.pack(fill="x", padx=SPACE["lg"], pady=(SPACE["sm"], 0))
         self.nav_buttons = {}
         nav_items = [
-            ("dashboard", "⚡ Dashboard"),
-            ("engine", "⚙️ Movement Engine"),
-            ("scheduler", "⏱️ Smart Breaks"),
-            ("hotkeys", "⌨️ Hotkeys & System"),
-            ("license", "🔑 SaaS License"),
+            ("dashboard", "Today"),
+            ("engine", "Movement"),
+            ("scheduler", "Rhythm"),
+            ("hotkeys", "Preferences"),
+            ("license", "License"),
         ]
 
         for tab_id, text in nav_items:
             btn = ctk.CTkButton(
-                self.sidebar_frame,
+                nav_frame,
                 text=text,
-                anchor="w",
-                font=ctk.CTkFont(size=13),
-                height=38,
-                corner_radius=8,
-
+                font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+                height=34,
+                corner_radius=RADIUS["pill"],
                 fg_color="transparent",
                 text_color=THEME["text_secondary"],
                 hover_color=THEME["surface_elevated"],
                 command=lambda tid=tab_id: self._select_tab(tid),
             )
-            btn.pack(fill="x", padx=12, pady=4)
+            btn.pack(side="left", padx=(0, SPACE["xs"]))
             self.nav_buttons[tab_id] = btn
 
-        # Bottom Sidebar Status
-        spacer = ctk.CTkLabel(self.sidebar_frame, text="")
-        spacer.pack(fill="both", expand=True)
-
-        status_box = ctk.CTkFrame(
-            self.sidebar_frame,
-            fg_color=THEME["surface_elevated"],
-            corner_radius=8,
-            border_width=1,
-            border_color=THEME["surface_border"],
-        )
-        status_box.pack(fill="x", padx=12, pady=(0, 16))
-
-        self.sidebar_status_dot = ctk.CTkLabel(
-            status_box,
-            text="●",
-            font=ctk.CTkFont(size=14),
-            text_color=THEME["accent_green"] if self.engine.is_running else THEME["text_muted"],
-        )
-        self.sidebar_status_dot.pack(side="left", padx=(10, 4), pady=8)
-
-        self.sidebar_status_txt = ctk.CTkLabel(
-            status_box,
-            text="Running" if self.engine.is_running else "Idle",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color=THEME["text_primary"],
-        )
-        self.sidebar_status_txt.pack(side="left", padx=(0, 10), pady=8)
-
     def _build_content_area(self) -> None:
-        """Constructs right-hand dynamic view area."""
+        """Constructs the active view below the header and navigation."""
         self.content_container = ctk.CTkFrame(self, fg_color="transparent")
-        self.content_container.pack(side="right", fill="both", expand=True, padx=24, pady=20)
+        self.content_container.pack(
+            fill="both",
+            expand=True,
+            padx=SPACE["lg"],
+            pady=(SPACE["sm"], SPACE["md"]),
+        )
 
         # Tab Views Dictionary
         self.tabs = {}
@@ -201,7 +199,7 @@ class MainWindow(ctk.CTk):
         self._select_tab("dashboard")
 
     def _select_tab(self, tab_id: str) -> None:
-        """Switches active view and updates sidebar styling."""
+        """Switches the active view and updates navigation styling."""
         self._active_tab = tab_id
         for tid, frame in self.tabs.items():
             if tid == tab_id:
@@ -212,9 +210,9 @@ class MainWindow(ctk.CTk):
         for tid, btn in self.nav_buttons.items():
             if tid == tab_id:
                 btn.configure(
-                    fg_color=THEME["primary"],
-                    text_color=THEME["text_primary"],
-                    hover_color=THEME["primary_hover"],
+                    fg_color=THEME["accent_sage"],
+                    text_color=THEME["on_accent"],
+                    hover_color=THEME["accent_sage_deep"],
                 )
             else:
                 btn.configure(
@@ -223,144 +221,259 @@ class MainWindow(ctk.CTk):
                     hover_color=THEME["surface_elevated"],
                 )
 
-    # ── View 1: Dashboard ──────────────────────────────────────────────────────────
+    def toggle_theme(self) -> None:
+        next_theme = "day" if ctk.get_appearance_mode().lower() == "dark" else "night"
+        self.config.set("theme", next_theme)
+        ctk.set_appearance_mode("dark" if next_theme == "night" else "light")
+        self._refresh_pomodoro_ring(self.engine.scheduler.get_cycle_progress())
+        self._update_theme_button()
+        self._set_app_icon()
+        if self.on_theme_change:
+            self.on_theme_change()
+
+    def current_theme(self) -> str:
+        return "night" if ctk.get_appearance_mode().lower() == "dark" else "day"
+
+    def _update_theme_button(self) -> None:
+        mode = self.current_theme()
+        label = "Twilight" if mode == "day" else "Soft Meadow"
+        self.theme_toggle_btn.configure(
+            text=f"☾ Switch to {label}" if mode == "day" else f"☼ Switch to {label}"
+        )
+
+    # ── View 1: Today ──────────────────────────────────────────────────────────────
     def _create_dashboard_view(self) -> ctk.CTkFrame:
         view = ctk.CTkFrame(self.content_container, fg_color="transparent")
+        hour = time.localtime().tm_hour
+        greeting = "Good morning" if hour < 12 else "Good afternoon" if hour < 18 else "Good evening"
+        ctk.CTkLabel(
+            view,
+            text=greeting,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=23, weight="bold"),
+            text_color=THEME["text_primary"],
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            view,
+            text="A little room to breathe, whenever you need it.",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13),
+            text_color=THEME["text_secondary"],
+        ).pack(anchor="w", pady=(0, SPACE["sm"]))
 
-        # Hero Card: Status & Big Action Button
         hero = ctk.CTkFrame(
             view,
             fg_color=THEME["surface"],
-            corner_radius=12,
+            corner_radius=RADIUS["card"],
             border_width=1,
             border_color=THEME["surface_border"],
         )
-        hero.pack(fill="x", pady=(0, 16), padx=2)
+        hero.pack(fill="x", pady=(0, SPACE["md"]), padx=1)
 
         hero_top = ctk.CTkFrame(hero, fg_color="transparent")
-        hero_top.pack(fill="x", padx=20, pady=(18, 10))
+        hero_top.pack(fill="x", padx=SPACE["md"], pady=(SPACE["md"], SPACE["xs"]))
 
         self.hero_status_badge = ctk.CTkLabel(
             hero_top,
-            text="⚪ IDLE & READY",
-            font=ctk.CTkFont(size=12, weight="bold"),
+            text="○ Resting",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
             text_color=THEME["badge_idle_text"],
             fg_color=THEME["badge_idle_bg"],
-            corner_radius=6,
-            padx=10,
-            pady=4,
+            corner_radius=RADIUS["pill"],
+            padx=12,
+            pady=6,
         )
         self.hero_status_badge.pack(side="left")
 
         self.plan_indicator = ctk.CTkLabel(
             hero_top,
-            text="PRO LIFETIME" if self.licensing.is_pro else f"FREE TRIAL ({self.licensing.days_remaining}d)",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color=THEME["accent_cyan"],
+            text="Licensed" if self.licensing.is_pro else f"{self.licensing.days_remaining} days left in your free trial",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+            text_color=THEME["on_accent"],
+            fg_color=THEME["accent_sky"],
+            corner_radius=RADIUS["pill"],
+            padx=10,
+            pady=6,
         )
-        self.plan_indicator.pack(side="right")
 
-        # Big Timer
-        timer_box = ctk.CTkFrame(hero, fg_color="transparent")
-        timer_box.pack(fill="x", padx=20, pady=(0, 12))
+        hero_body = ctk.CTkFrame(hero, fg_color="transparent")
+        hero_body.pack(fill="x", padx=SPACE["md"], pady=(SPACE["xs"], SPACE["md"]))
+
+        hero_copy = ctk.CTkFrame(hero_body, fg_color="transparent")
+        hero_copy.pack(side="left", fill="both", expand=True)
 
         self.live_timer_lbl = ctk.CTkLabel(
-            timer_box,
-            text="00:00:00",
-            font=ctk.CTkFont(family="Consolas" if sys_is_windows() else "monospace", size=46, weight="bold"),
+            hero_copy,
+            text=f"{int(self.config.get('work_duration_minutes', 25)):02d}:00",
+            font=ctk.CTkFont(family=DISPLAY_FONT_FAMILY, size=38, weight="bold"),
             text_color=THEME["text_primary"],
         )
-        self.live_timer_lbl.pack(anchor="w")
+        self.live_timer_lbl.pack(anchor="w", pady=(0, 0))
 
-        timer_sub = ctk.CTkLabel(
-            timer_box,
-            text="Total session active working time today",
-            font=ctk.CTkFont(size=12),
-            text_color=THEME["text_muted"],
-        )
-        timer_sub.pack(anchor="w")
-
-        # Start / Stop Toggle Button
-        self.hero_action_btn = ctk.CTkButton(
-            hero,
-            text="START ASSISTANT (F9)",
-            font=ctk.CTkFont(size=15, weight="bold"),
-            height=46,
-            corner_radius=10,
-            fg_color=THEME["accent_green"],
-            hover_color=THEME["accent_green_hover"],
-            command=self._toggle_engine,
-        )
-        self.hero_action_btn.pack(fill="x", padx=20, pady=(4, 18))
-
-        # Metrics Row (4 Cards)
-        metrics_row = ctk.CTkFrame(view, fg_color="transparent")
-        metrics_row.pack(fill="x", pady=(0, 16))
-        metrics_row.grid_columnconfigure((0, 1, 2, 3), weight=1, uniform="metric")
-
-        self.metric_mode_val = self._create_metric_card(metrics_row, 0, "Simulation Mode", "Natural Bezier")
-        self.metric_interval_val = self._create_metric_card(
-            metrics_row, 1, "Interval Delay", f"{self.config.get('interval_min')}s - {self.config.get('interval_max')}s"
-        )
-        self.metric_breaks_val = self._create_metric_card(metrics_row, 2, "Breaks Completed", "0")
-        self.metric_pause_val = self._create_metric_card(
-            metrics_row, 3, "Auto-Pause", "Active" if self.config.get("auto_pause_on_user") else "Off"
-        )
-
-        # Activity Log Card
-        log_card = ctk.CTkFrame(
-            view,
-            fg_color=THEME["surface"],
-            corner_radius=12,
-            border_width=1,
-            border_color=THEME["surface_border"],
-        )
-        log_card.pack(fill="both", expand=True, padx=2)
-
-        log_header = ctk.CTkFrame(log_card, fg_color="transparent")
-        log_header.pack(fill="x", padx=16, pady=(12, 6))
-
-        log_title = ctk.CTkLabel(
-            log_header,
-            text="Live Activity Feed",
-            font=ctk.CTkFont(size=13, weight="bold"),
-            text_color=THEME["text_primary"],
-        )
-        log_title.pack(side="left")
-
-        self.log_textbox = ctk.CTkTextbox(
-            log_card,
-            font=ctk.CTkFont(family="Consolas" if sys_is_windows() else "monospace", size=11),
-            fg_color=THEME["bg_dark"],
+        self.timer_phase_lbl = ctk.CTkLabel(
+            hero_copy,
+            text="Focus, at your own pace",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
             text_color=THEME["text_secondary"],
-            corner_radius=8,
-            border_width=1,
-            border_color=THEME["surface_border"],
         )
-        self.log_textbox.pack(fill="both", expand=True, padx=16, pady=(0, 14))
-        self.log_textbox.insert("end", f"[{time.strftime('%H:%M:%S')}] LazyVA initialized and ready.\n")
-        self.log_textbox.configure(state="disabled")
+        self.timer_phase_lbl.pack(anchor="w")
+
+        action_buttons = ctk.CTkFrame(hero_body, fg_color="transparent")
+        action_buttons.pack(side="right", padx=(SPACE["sm"], 0))
+        self.hero_action_btn = ctk.CTkButton(
+            action_buttons,
+            text="Start",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
+            width=82,
+            height=42,
+            corner_radius=RADIUS["pill"],
+            fg_color=THEME["accent_sage"],
+            hover_color=THEME["accent_sage_deep"],
+            text_color=THEME["on_accent"],
+            command=self.engine.start,
+        )
+        self.hero_action_btn.pack(side="left", padx=(0, SPACE["xs"]))
+        self.hero_stop_btn = ctk.CTkButton(
+            action_buttons,
+            text="Stop",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
+            width=82,
+            height=42,
+            corner_radius=RADIUS["pill"],
+            border_width=1,
+            border_color=THEME["accent_sage_deep"],
+            fg_color="transparent",
+            hover_color=THEME["surface_elevated"],
+            text_color=THEME["text_secondary"],
+            state="disabled",
+            command=self.engine.stop,
+        )
+        self.hero_stop_btn.pack(side="left")
+
+        cards_row = ctk.CTkFrame(view, fg_color="transparent")
+        cards_row.pack(fill="x", pady=(0, SPACE["md"]))
+        cards_row.grid_columnconfigure((0, 1), weight=1, uniform="dashboard")
+
+        mode_column = ctk.CTkFrame(cards_row, fg_color="transparent")
+        mode_column.grid(row=0, column=0, sticky="nsew", padx=(0, SPACE["sm"]))
+        mode_card = self._create_card(mode_column, "Movement mode")
+        self.mode_var = ctk.StringVar(value=self.config.get("mode", "natural"))
+        mode_value = {
+            "natural": "Glide",
+            "jitter": "Nudge",
+            "keepalive_only": "Native",
+        }.get(self.mode_var.get(), "Glide")
+        mode_controls = ctk.CTkFrame(mode_card, fg_color="transparent")
+        mode_controls.pack(fill="x", padx=SPACE["md"], pady=(SPACE["sm"], SPACE["md"]))
+        self.dashboard_mode_buttons = {}
+        for label in ("Glide", "Nudge", "Native"):
+            button = ctk.CTkButton(
+                mode_controls,
+                text=label,
+                width=76,
+                height=34,
+                corner_radius=RADIUS["pill"],
+                font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+                command=lambda selected=label: self._on_dashboard_mode_change(selected),
+            )
+            button.pack(side="left", fill="x", expand=True, padx=2)
+            self.dashboard_mode_buttons[label] = button
+        self._update_mode_buttons(mode_value)
+
+        focus_column = ctk.CTkFrame(cards_row, fg_color="transparent")
+        focus_column.grid(row=0, column=1, sticky="nsew", padx=(SPACE["sm"], 0))
+        focus_card = self._create_card(focus_column, "Focus rhythm")
+        self.pomodoro_ring = tk.Canvas(
+            focus_card,
+            width=108,
+            height=108,
+            highlightthickness=0,
+            bd=0,
+            bg=resolve_color(THEME["surface"], ctk.get_appearance_mode()),
+        )
+        self.pomodoro_ring.pack(side="right", padx=SPACE["sm"], pady=SPACE["xs"])
+        self.pomodoro_track = self.pomodoro_ring.create_arc(
+            12, 12, 96, 96, start=0, extent=359, style=tk.ARC, width=8
+        )
+        self.pomodoro_arc = self.pomodoro_ring.create_arc(
+            12, 12, 96, 96, start=90, extent=0, style=tk.ARC, width=8
+        )
+        self.pomodoro_time_item = self.pomodoro_ring.create_text(
+            54,
+            49,
+            text=f"{int(self.config.get('work_duration_minutes', 25)):02d}:00",
+            font=(DISPLAY_FONT_FAMILY, 17, "bold"),
+        )
+        self.pomodoro_phase_item = self.pomodoro_ring.create_text(
+            54, 69, text="Focus", font=(FONT_FAMILY, 9)
+        )
+        self._refresh_pomodoro_ring(0.0)
+        ctk.CTkLabel(
+            focus_card,
+            text="A gentle pause is part of the rhythm.",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+            text_color=THEME["text_secondary"],
+            wraplength=130,
+            justify="left",
+        ).pack(side="left", fill="x", expand=True, padx=(SPACE["md"], 0), pady=SPACE["sm"])
+
+        footer = ctk.CTkFrame(view, fg_color="transparent")
+        footer.pack(fill="x", pady=(0, SPACE["xs"]))
+        self._create_hotkey_chip(footer, "F9", "Start").pack(side="left", padx=(0, SPACE["xs"]))
+        self._create_hotkey_chip(footer, "F10", "Stop").pack(side="left", padx=(0, SPACE["xs"]))
+        self._create_hotkey_chip(footer, "F11", "Exit").pack(side="left")
+        self.plan_indicator.pack(side="right")
 
         return view
 
-    def _create_metric_card(self, parent, col: int, title: str, initial_val: str) -> ctk.CTkLabel:
-        card = ctk.CTkFrame(
+    def _create_hotkey_chip(self, parent, key: str, label: str) -> ctk.CTkFrame:
+        chip = ctk.CTkFrame(
             parent,
-            fg_color=THEME["surface"],
-            corner_radius=10,
-            border_width=1,
-            border_color=THEME["surface_border"],
+            fg_color=THEME["surface_elevated"],
+            corner_radius=RADIUS["pill"],
         )
-        card.grid(row=0, column=col, padx=4, sticky="nsew")
+        ctk.CTkLabel(
+            chip,
+            text=key,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
+            text_color=THEME["text_primary"],
+        ).pack(side="left", padx=(SPACE["sm"], SPACE["xs"]), pady=SPACE["xs"])
+        ctk.CTkLabel(
+            chip,
+            text=label,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+            text_color=THEME["text_secondary"],
+        ).pack(side="left", padx=(0, SPACE["sm"]), pady=SPACE["xs"])
+        return chip
 
-        lbl_title = ctk.CTkLabel(card, text=title, font=ctk.CTkFont(size=11), text_color=THEME["text_muted"])
-        lbl_title.pack(anchor="w", padx=12, pady=(10, 2))
+    def _on_dashboard_mode_change(self, value: str) -> None:
+        self.mode_var.set({"Glide": "natural", "Nudge": "jitter", "Native": "keepalive_only"}[value])
+        self._on_settings_change()
 
-        lbl_val = ctk.CTkLabel(
-            card, text=initial_val, font=ctk.CTkFont(size=14, weight="bold"), text_color=THEME["text_primary"]
+    def _update_mode_buttons(self, selected: str) -> None:
+        for label, button in self.dashboard_mode_buttons.items():
+            is_selected = label == selected
+            button.configure(
+                fg_color=THEME["accent_sage"] if is_selected else THEME["surface_elevated"],
+                hover_color=THEME["accent_sage_deep"] if is_selected else THEME["surface_border"],
+                text_color=THEME["on_accent"] if is_selected else THEME["text_secondary"],
+            )
+
+    def _refresh_pomodoro_ring(self, progress: float) -> None:
+        appearance = ctk.get_appearance_mode()
+        self.pomodoro_ring.configure(bg=resolve_color(THEME["surface"], appearance))
+        self.pomodoro_ring.itemconfigure(
+            self.pomodoro_track,
+            outline=resolve_color(THEME["surface_elevated"], appearance),
         )
-        lbl_val.pack(anchor="w", padx=12, pady=(0, 10))
-        return lbl_val
+        self.pomodoro_ring.itemconfigure(
+            self.pomodoro_arc,
+            outline=resolve_color(THEME["accent_lavender"], appearance),
+            extent=-360 * max(0.0, min(1.0, progress)),
+        )
+        for item in (self.pomodoro_time_item, self.pomodoro_phase_item):
+            self.pomodoro_ring.itemconfigure(
+                item,
+                fill=resolve_color(THEME["text_primary"], appearance),
+            )
 
     # ── View 2: Movement Engine Settings ──────────────────────────────────────────
     def _create_engine_view(self) -> ctk.CTkScrollableFrame:
@@ -370,17 +483,21 @@ class MainWindow(ctk.CTk):
             scrollbar_button_color=THEME["surface_elevated"],
         )
 
-        title = ctk.CTkLabel(view, text="Movement & Keep-Awake Settings", font=ctk.CTkFont(size=18, weight="bold"))
-        title.pack(anchor="w", pady=(0, 12))
+        title = ctk.CTkLabel(
+            view,
+            text="Movement",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=20, weight="bold"),
+            text_color=THEME["text_primary"],
+        )
+        title.pack(anchor="w", pady=(0, SPACE["sm"]))
 
-        # Mode Selection Card
-        mode_card = self._create_card(view, "Simulation Mode")
-        self.mode_var = ctk.StringVar(value=self.config.get("mode", "natural"))
+        mode_card = self._create_card(view, "Choose a gentle way to keep things awake")
+        self.mode_var.set(self.config.get("mode", "natural"))
 
         modes = [
-            ("natural", "Natural Bezier Glide", "Simulates organic human hand movement with easing and micro-curves."),
-            ("jitter", "Micro-Jitter Nudge", "Moves 1-4 pixels then returns instantly. Barely perceptible."),
-            ("keepalive_only", "Keep-Awake API Only", "Native Windows OS sleep prevention. No cursor movement whatsoever."),
+            ("natural", "Glide", "A soft, natural cursor movement."),
+            ("jitter", "Nudge", "A small movement, then back again."),
+            ("keepalive_only", "Native", "Keep the screen awake without moving the cursor."),
         ]
 
         for val, name, desc in modes:
@@ -391,20 +508,28 @@ class MainWindow(ctk.CTk):
                 text=name,
                 variable=self.mode_var,
                 value=val,
-                font=ctk.CTkFont(size=13, weight="bold"),
+                font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
+                fg_color=THEME["accent_sage_deep"],
+                hover_color=THEME["accent_sage"],
+                border_color=THEME["surface_border"],
                 command=self._on_settings_change,
             )
             rb.pack(anchor="w")
-            d_lbl = ctk.CTkLabel(r_frame, text=desc, font=ctk.CTkFont(size=11), text_color=THEME["text_muted"])
+            d_lbl = ctk.CTkLabel(
+                r_frame,
+                text=desc,
+                font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+                text_color=THEME["text_secondary"],
+            )
             d_lbl.pack(anchor="w", padx=(28, 0))
 
-        # Intervals Card
-        interval_card = self._create_card(view, "Interval Timing")
+        interval_card = self._create_card(view, "Movement pace")
 
         self.min_interval_val_lbl = ctk.CTkLabel(
             interval_card,
-            text=f"Min Delay: {self.config.get('interval_min')}s",
-            font=ctk.CTkFont(size=12, weight="bold"),
+            text=f"Minimum pause: {self.config.get('interval_min')} sec",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+            text_color=THEME["text_primary"],
         )
         self.min_interval_val_lbl.pack(anchor="w", padx=16, pady=(8, 0))
 
@@ -414,14 +539,19 @@ class MainWindow(ctk.CTk):
             to=60,
             number_of_steps=55,
             command=self._update_min_interval,
+            progress_color=THEME["accent_sage_deep"],
+            button_color=THEME["accent_sage"],
+            button_hover_color=THEME["accent_sage_deep"],
+            fg_color=THEME["surface_elevated"],
         )
         self.min_slider.set(self.config.get("interval_min", 15))
         self.min_slider.pack(fill="x", padx=16, pady=(4, 12))
 
         self.max_interval_val_lbl = ctk.CTkLabel(
             interval_card,
-            text=f"Max Delay: {self.config.get('interval_max')}s",
-            font=ctk.CTkFont(size=12, weight="bold"),
+            text=f"Maximum pause: {self.config.get('interval_max')} sec",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+            text_color=THEME["text_primary"],
         )
         self.max_interval_val_lbl.pack(anchor="w", padx=16, pady=(4, 0))
 
@@ -431,17 +561,24 @@ class MainWindow(ctk.CTk):
             to=180,
             number_of_steps=165,
             command=self._update_max_interval,
+            progress_color=THEME["accent_sage_deep"],
+            button_color=THEME["accent_sage"],
+            button_hover_color=THEME["accent_sage_deep"],
+            fg_color=THEME["surface_elevated"],
         )
         self.max_slider.set(self.config.get("interval_max", 45))
         self.max_slider.pack(fill="x", padx=16, pady=(4, 16))
 
-        # Auto-Pause Card
-        pause_card = self._create_card(view, "Human Interaction Detection")
+        pause_card = self._create_card(view, "When you move the mouse")
 
         self.auto_pause_switch = ctk.CTkSwitch(
             pause_card,
-            text="Auto-pause when physical mouse movement is detected",
-            font=ctk.CTkFont(size=13),
+            text="Step aside while you are using the mouse",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13),
+            progress_color=THEME["accent_sage"],
+            button_color=THEME["surface"],
+            button_hover_color=THEME["surface_elevated"],
+            fg_color=THEME["surface_elevated"],
             command=self._on_settings_change,
         )
         if self.config.get("auto_pause_on_user", True):
@@ -450,8 +587,9 @@ class MainWindow(ctk.CTk):
 
         self.cooldown_val_lbl = ctk.CTkLabel(
             pause_card,
-            text=f"Inactivity Cooldown: {self.config.get('auto_pause_cooldown')}s",
-            font=ctk.CTkFont(size=12),
+            text=f"Wait before resuming: {self.config.get('auto_pause_cooldown')} sec",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+            text_color=THEME["text_secondary"],
         )
         self.cooldown_val_lbl.pack(anchor="w", padx=16, pady=(4, 0))
 
@@ -461,6 +599,10 @@ class MainWindow(ctk.CTk):
             to=15.0,
             number_of_steps=28,
             command=self._update_cooldown,
+            progress_color=THEME["accent_sage_deep"],
+            button_color=THEME["accent_sage"],
+            button_hover_color=THEME["accent_sage_deep"],
+            fg_color=THEME["surface_elevated"],
         )
         self.cooldown_slider.set(self.config.get("auto_pause_cooldown", 4.0))
         self.cooldown_slider.pack(fill="x", padx=16, pady=(4, 16))
@@ -471,15 +613,24 @@ class MainWindow(ctk.CTk):
     def _create_scheduler_view(self) -> ctk.CTkFrame:
         view = ctk.CTkFrame(self.content_container, fg_color="transparent")
 
-        title = ctk.CTkLabel(view, text="Smart Pomodoro & Break Scheduler", font=ctk.CTkFont(size=18, weight="bold"))
-        title.pack(anchor="w", pady=(0, 12))
+        title = ctk.CTkLabel(
+            view,
+            text="A gentler rhythm",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=20, weight="bold"),
+            text_color=THEME["text_primary"],
+        )
+        title.pack(anchor="w", pady=(0, SPACE["sm"]))
 
-        sched_card = self._create_card(view, "Automated Work/Break Cycles")
+        sched_card = self._create_card(view, "Time for focus, then time to rest")
 
         self.enable_breaks_switch = ctk.CTkSwitch(
             sched_card,
-            text="Enable Smart Breaks",
-            font=ctk.CTkFont(size=14, weight="bold"),
+            text="Make room for regular breaks",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold"),
+            progress_color=THEME["accent_sage"],
+            button_color=THEME["surface"],
+            button_hover_color=THEME["surface_elevated"],
+            fg_color=THEME["surface_elevated"],
             command=self._on_settings_change,
         )
         if self.config.get("enable_breaks", True):
@@ -489,8 +640,9 @@ class MainWindow(ctk.CTk):
         # Work Duration
         self.work_dur_lbl = ctk.CTkLabel(
             sched_card,
-            text=f"Work Duration: {self.config.get('work_duration_minutes')} minutes",
-            font=ctk.CTkFont(size=12),
+            text=f"Focus time: {self.config.get('work_duration_minutes')} minutes",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+            text_color=THEME["text_primary"],
         )
         self.work_dur_lbl.pack(anchor="w", padx=16, pady=(6, 0))
 
@@ -500,6 +652,10 @@ class MainWindow(ctk.CTk):
             to=90,
             number_of_steps=16,
             command=lambda val: self._update_scheduler_durations(),
+            progress_color=THEME["accent_sage_deep"],
+            button_color=THEME["accent_sage"],
+            button_hover_color=THEME["accent_sage_deep"],
+            fg_color=THEME["surface_elevated"],
         )
         self.work_dur_slider.set(self.config.get("work_duration_minutes", 25))
         self.work_dur_slider.pack(fill="x", padx=16, pady=(4, 14))
@@ -507,8 +663,9 @@ class MainWindow(ctk.CTk):
         # Break Duration
         self.break_dur_lbl = ctk.CTkLabel(
             sched_card,
-            text=f"Break Duration: {self.config.get('break_duration_minutes')} minutes",
-            font=ctk.CTkFont(size=12),
+            text=f"Rest time: {self.config.get('break_duration_minutes')} minutes",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+            text_color=THEME["text_primary"],
         )
         self.break_dur_lbl.pack(anchor="w", padx=16, pady=(4, 0))
 
@@ -518,6 +675,10 @@ class MainWindow(ctk.CTk):
             to=20,
             number_of_steps=19,
             command=lambda val: self._update_scheduler_durations(),
+            progress_color=THEME["accent_lavender"],
+            button_color=THEME["accent_lavender"],
+            button_hover_color=THEME["accent_sage_deep"],
+            fg_color=THEME["surface_elevated"],
         )
         self.break_dur_slider.set(self.config.get("break_duration_minutes", 5))
         self.break_dur_slider.pack(fill="x", padx=16, pady=(4, 16))
@@ -525,8 +686,12 @@ class MainWindow(ctk.CTk):
         # Notification toggle
         self.notify_break_switch = ctk.CTkSwitch(
             sched_card,
-            text="Notify with desktop alert when break starts",
-            font=ctk.CTkFont(size=13),
+            text="Let me know when it is time to rest",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13),
+            progress_color=THEME["accent_sage"],
+            button_color=THEME["surface"],
+            button_hover_color=THEME["surface_elevated"],
+            fg_color=THEME["surface_elevated"],
             command=self._on_settings_change,
         )
         if self.config.get("notify_on_break", True):
@@ -537,39 +702,50 @@ class MainWindow(ctk.CTk):
 
     # ── View 4: Hotkeys & System ──────────────────────────────────────────────────
     def _create_hotkeys_view(self) -> ctk.CTkFrame:
-        view = ctk.CTkFrame(self.content_container, fg_color="transparent")
+        view = ctk.CTkScrollableFrame(
+            self.content_container,
+            fg_color="transparent",
+            scrollbar_button_color=THEME["surface_elevated"],
+        )
 
-        title = ctk.CTkLabel(view, text="Hotkeys & Windows Integration", font=ctk.CTkFont(size=18, weight="bold"))
-        title.pack(anchor="w", pady=(0, 12))
+        title = ctk.CTkLabel(
+            view,
+            text="Preferences",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=20, weight="bold"),
+            text_color=THEME["text_primary"],
+        )
+        title.pack(anchor="w", pady=(0, SPACE["sm"]))
 
-        # Hotkeys
-        hk_card = self._create_card(view, "Global Keyboard Shortcuts")
+        hk_card = self._create_card(view, "A few handy shortcuts")
 
         hk_grid = ctk.CTkFrame(hk_card, fg_color="transparent")
-        hk_grid.pack(fill="x", padx=16, pady=12)
+        hk_grid.pack(fill="x", padx=SPACE["md"], pady=SPACE["sm"])
 
-        ctk.CTkLabel(hk_grid, text="Start Assistant:", font=ctk.CTkFont(size=13)).grid(row=0, column=0, sticky="w", pady=6)
-        ctk.CTkLabel(hk_grid, text="F9", font=ctk.CTkFont(size=13, weight="bold"), text_color=THEME["accent_cyan"]).grid(
+        ctk.CTkLabel(hk_grid, text="Start", font=ctk.CTkFont(family=FONT_FAMILY, size=13), text_color=THEME["text_primary"]).grid(row=0, column=0, sticky="w", pady=6)
+        ctk.CTkLabel(hk_grid, text="F9", font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"), text_color=THEME["accent_sage_text"]).grid(
             row=0, column=1, sticky="w", padx=16, pady=6
         )
 
-        ctk.CTkLabel(hk_grid, text="Stop / Pause Assistant:", font=ctk.CTkFont(size=13)).grid(row=1, column=0, sticky="w", pady=6)
-        ctk.CTkLabel(hk_grid, text="F10", font=ctk.CTkFont(size=13, weight="bold"), text_color=THEME["accent_amber"]).grid(
+        ctk.CTkLabel(hk_grid, text="Stop", font=ctk.CTkFont(family=FONT_FAMILY, size=13), text_color=THEME["text_primary"]).grid(row=1, column=0, sticky="w", pady=6)
+        ctk.CTkLabel(hk_grid, text="F10", font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"), text_color=THEME["accent_apricot_text"]).grid(
             row=1, column=1, sticky="w", padx=16, pady=6
         )
 
-        ctk.CTkLabel(hk_grid, text="Exit LazyVA Completely:", font=ctk.CTkFont(size=13)).grid(row=2, column=0, sticky="w", pady=6)
-        ctk.CTkLabel(hk_grid, text="F11", font=ctk.CTkFont(size=13, weight="bold"), text_color=THEME["accent_red"]).grid(
+        ctk.CTkLabel(hk_grid, text="Quit LazyVA", font=ctk.CTkFont(family=FONT_FAMILY, size=13), text_color=THEME["text_primary"]).grid(row=2, column=0, sticky="w", pady=6)
+        ctk.CTkLabel(hk_grid, text="F11", font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"), text_color=THEME["accent_rose_text"]).grid(
             row=2, column=1, sticky="w", padx=16, pady=6
         )
 
-        # Windows Integration Card
-        win_card = self._create_card(view, "Windows System Behavior")
+        win_card = self._create_card(view, "When LazyVA starts or closes")
 
         self.startup_switch = ctk.CTkSwitch(
             win_card,
-            text="Launch LazyVA automatically on Windows startup",
-            font=ctk.CTkFont(size=13),
+            text="Open LazyVA when I sign in to Windows",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13),
+            progress_color=THEME["accent_sage"],
+            button_color=THEME["surface"],
+            button_hover_color=THEME["surface_elevated"],
+            fg_color=THEME["surface_elevated"],
             command=self._on_toggle_startup,
         )
         if self.config.get("launch_on_startup", False):
@@ -578,8 +754,12 @@ class MainWindow(ctk.CTk):
 
         self.minimized_switch = ctk.CTkSwitch(
             win_card,
-            text="Start minimized directly to the System Tray",
-            font=ctk.CTkFont(size=13),
+            text="Start quietly in the system tray",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13),
+            progress_color=THEME["accent_sage"],
+            button_color=THEME["surface"],
+            button_hover_color=THEME["surface_elevated"],
+            fg_color=THEME["surface_elevated"],
             command=self._on_settings_change,
         )
         if self.config.get("start_minimized", False):
@@ -588,75 +768,102 @@ class MainWindow(ctk.CTk):
 
         self.close_to_tray_switch = ctk.CTkSwitch(
             win_card,
-            text="Minimize to System Tray when closing the window",
-            font=ctk.CTkFont(size=13),
+            text="Keep LazyVA in the tray when I close this window",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13),
+            progress_color=THEME["accent_sage"],
+            button_color=THEME["surface"],
+            button_hover_color=THEME["surface_elevated"],
+            fg_color=THEME["surface_elevated"],
             command=self._on_settings_change,
         )
         if self.config.get("close_to_tray", True):
             self.close_to_tray_switch.select()
         self.close_to_tray_switch.pack(anchor="w", padx=16, pady=(4, 16))
 
+        log_card = self._create_card(view, "A quiet little activity log")
+        self.log_textbox = ctk.CTkTextbox(
+            log_card,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+            fg_color=THEME["surface_elevated"],
+            text_color=THEME["text_secondary"],
+            corner_radius=RADIUS["input"],
+            border_width=1,
+            border_color=THEME["surface_border"],
+        )
+        self.log_textbox.pack(fill="both", expand=True, padx=SPACE["md"], pady=(SPACE["xs"], SPACE["md"]))
+        self.log_textbox.insert("end", f"{time.strftime('%H:%M')}  LazyVA is ready.\n")
+        self.log_textbox.configure(state="disabled")
+
         return view
 
-    # ── View 5: License & SaaS Activation ─────────────────────────────────────────
+    # ── View 5: License ───────────────────────────────────────────────────────────
     def _create_license_view(self) -> ctk.CTkFrame:
         view = ctk.CTkFrame(self.content_container, fg_color="transparent")
 
-        title = ctk.CTkLabel(view, text="SaaS Licensing & Device Activation", font=ctk.CTkFont(size=18, weight="bold"))
-        title.pack(anchor="w", pady=(0, 12))
+        title = ctk.CTkLabel(
+            view,
+            text="Your LazyVA plan",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=20, weight="bold"),
+            text_color=THEME["text_primary"],
+        )
+        title.pack(anchor="w", pady=(0, SPACE["sm"]))
 
-        # Current Plan Card
-        plan_card = self._create_card(view, "Current Subscription / Plan")
+        plan_card = self._create_card(view, "Your plan")
         plan_box = ctk.CTkFrame(plan_card, fg_color="transparent")
         plan_box.pack(fill="x", padx=16, pady=12)
 
         self.license_tier_badge = ctk.CTkLabel(
             plan_box,
-            text="PRO LIFETIME" if self.licensing.is_pro else f"FREE TRIAL ({self.licensing.days_remaining} Days Remaining)",
-            font=ctk.CTkFont(size=14, weight="bold"),
+            text="Licensed" if self.licensing.is_pro else f"{self.licensing.days_remaining} days left in your free trial",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
             text_color=THEME["badge_active_text"] if self.licensing.is_pro else THEME["badge_break_text"],
             fg_color=THEME["badge_active_bg"] if self.licensing.is_pro else THEME["badge_break_bg"],
-            corner_radius=6,
+            corner_radius=RADIUS["pill"],
             padx=12,
-            pady=6,
+            pady=8,
         )
         self.license_tier_badge.pack(side="left")
 
-        # Hardware ID Card
-        hwid_card = self._create_card(view, "Registered Device Hardware Fingerprint (HWID)")
+        hwid_card = self._create_card(view, "This device")
         hwid_box = ctk.CTkFrame(hwid_card, fg_color="transparent")
         hwid_box.pack(fill="x", padx=16, pady=12)
 
         hwid_lbl = ctk.CTkLabel(
             hwid_box,
             text=self.licensing.machine_id,
-            font=ctk.CTkFont(family="Consolas" if sys_is_windows() else "monospace", size=13, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
             text_color=THEME["text_primary"],
         )
         hwid_lbl.pack(side="left")
 
         copy_btn = ctk.CTkButton(
             hwid_box,
-            text="Copy HWID",
+            text="Copy ID",
             width=90,
             height=28,
-            font=ctk.CTkFont(size=11),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
             fg_color=THEME["surface_elevated"],
             hover_color=THEME["surface_border"],
+            text_color=THEME["text_primary"],
+            corner_radius=RADIUS["pill"],
             command=self._copy_hwid,
         )
         copy_btn.pack(side="right")
 
-        # License Key Activation Card
-        act_card = self._create_card(view, "Activate License Key")
+        act_card = self._create_card(view, "Add a license")
         act_box = ctk.CTkFrame(act_card, fg_color="transparent")
         act_box.pack(fill="x", padx=16, pady=(12, 8))
 
         self.license_entry = ctk.CTkEntry(
             act_box,
-            placeholder_text="Enter license key (e.g. LVA-PRO-XXXXX-XXXXX-XXXXX)",
-            font=ctk.CTkFont(family="Consolas" if sys_is_windows() else "monospace", size=12),
+            placeholder_text="Enter your license key",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
             height=40,
+            corner_radius=RADIUS["input"],
+            fg_color=THEME["surface_elevated"],
+            border_color=THEME["surface_border"],
+            text_color=THEME["text_primary"],
+            placeholder_text_color=THEME["text_muted"],
         )
         self.license_entry.pack(side="left", fill="x", expand=True, padx=(0, 12))
         stored_key = self.config.get("license_key", "")
@@ -668,9 +875,11 @@ class MainWindow(ctk.CTk):
             text="Activate",
             width=110,
             height=40,
-            font=ctk.CTkFont(size=13, weight="bold"),
-            fg_color=THEME["primary"],
-            hover_color=THEME["primary_hover"],
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
+            fg_color=THEME["accent_sage"],
+            hover_color=THEME["accent_sage_deep"],
+            text_color=THEME["on_accent"],
+            corner_radius=RADIUS["pill"],
             command=self._on_activate_license,
         )
         self.activate_btn.pack(side="right")
@@ -678,8 +887,8 @@ class MainWindow(ctk.CTk):
         self.license_feedback_lbl = ctk.CTkLabel(
             act_card,
             text="",
-            font=ctk.CTkFont(size=12),
-            text_color=THEME["accent_green"],
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+            text_color=THEME["accent_sage_text"],
         )
         self.license_feedback_lbl.pack(anchor="w", padx=16, pady=(0, 14))
 
@@ -690,14 +899,19 @@ class MainWindow(ctk.CTk):
         card = ctk.CTkFrame(
             parent,
             fg_color=THEME["surface"],
-            corner_radius=12,
+            corner_radius=RADIUS["card"],
             border_width=1,
             border_color=THEME["surface_border"],
         )
-        card.pack(fill="x", pady=6, padx=2)
+        card.pack(fill="both", expand=True, pady=SPACE["xs"], padx=1)
 
-        lbl = ctk.CTkLabel(card, text=title, font=ctk.CTkFont(size=13, weight="bold"), text_color=THEME["text_primary"])
-        lbl.pack(anchor="w", padx=16, pady=(12, 4))
+        lbl = ctk.CTkLabel(
+            card,
+            text=title,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold"),
+            text_color=THEME["text_primary"],
+        )
+        lbl.pack(anchor="w", padx=SPACE["md"], pady=(SPACE["md"], SPACE["xs"]))
         return card
 
     # ── Action Handlers ────────────────────────────────────────────────────────────
@@ -716,36 +930,37 @@ class MainWindow(ctk.CTk):
         if is_running:
             if state == SchedulerState.BREAK:
                 self.hero_status_badge.configure(
-                    text="🟡 IN SMART BREAK",
+                    text="◒ Rest time",
                     fg_color=THEME["badge_break_bg"],
                     text_color=THEME["badge_break_text"],
                 )
+                status_text = "◒ Rest time"
+                status_color = THEME["text_primary"]
             else:
                 self.hero_status_badge.configure(
-                    text="🟢 ACTIVE & WORKING",
+                    text="● Awake and steady",
                     fg_color=THEME["badge_active_bg"],
                     text_color=THEME["badge_active_text"],
                 )
+                status_text = "● Awake and steady"
+                status_color = THEME["accent_sage_text"]
             self.hero_action_btn.configure(
-                text="STOP ASSISTANT (F10)",
-                fg_color=THEME["accent_red"],
-                hover_color=THEME["accent_red_hover"],
+                state="disabled",
             )
-            self.sidebar_status_dot.configure(text_color=THEME["accent_green"])
-            self.sidebar_status_txt.configure(text="Running")
+            self.hero_stop_btn.configure(state="normal")
         else:
             self.hero_status_badge.configure(
-                text="⚪ IDLE & READY",
+                text="○ Resting",
                 fg_color=THEME["badge_idle_bg"],
                 text_color=THEME["badge_idle_text"],
             )
+            status_text = "○ Resting"
+            status_color = THEME["text_secondary"]
             self.hero_action_btn.configure(
-                text="START ASSISTANT (F9)",
-                fg_color=THEME["accent_green"],
-                hover_color=THEME["accent_green_hover"],
+                state="normal",
             )
-            self.sidebar_status_dot.configure(text_color=THEME["text_muted"])
-            self.sidebar_status_txt.configure(text="Idle")
+            self.hero_stop_btn.configure(state="disabled")
+        self.header_status.configure(text=status_text, text_color=status_color)
 
     def _on_activity_pulse(self, description: str) -> None:
         """Appends activity message to live log feed."""
@@ -759,15 +974,25 @@ class MainWindow(ctk.CTk):
         self.log_textbox.configure(state="disabled")
 
     def _start_ui_loop(self) -> None:
-        """Updates live timer and metrics every second."""
+        """Refreshes the focus ring and countdown once per second."""
         def _tick():
-            if self.engine.is_running:
-                total_sec = int(self.engine.scheduler.total_active_seconds)
-                hrs = total_sec // 3600
-                mins = (total_sec % 3600) // 60
-                secs = total_sec % 60
-                self.live_timer_lbl.configure(text=f"{hrs:02d}:{mins:02d}:{secs:02d}")
-                self.metric_breaks_val.configure(text=str(self.engine.scheduler.breaks_count))
+            scheduler = self.engine.scheduler
+            in_break = scheduler.state == SchedulerState.BREAK
+            duration = scheduler.break_seconds if in_break else scheduler.work_seconds
+            progress = scheduler.get_cycle_progress() if self.engine.is_running else 0.0
+            remaining = int(max(0.0, duration * (1.0 - progress)))
+            minutes, seconds = divmod(remaining, 60)
+            self.live_timer_lbl.configure(text=f"{minutes:02d}:{seconds:02d}")
+            phase = "Rest" if in_break else "Focus"
+            self.timer_phase_lbl.configure(
+                text="Time for a little rest." if in_break else "Focus, at your own pace"
+            )
+            self.pomodoro_ring.itemconfigure(
+                self.pomodoro_time_item,
+                text=f"{minutes:02d}:{seconds:02d}",
+            )
+            self.pomodoro_ring.itemconfigure(self.pomodoro_phase_item, text=phase)
+            self._refresh_pomodoro_ring(progress)
 
             self.after(1000, _tick)
 
@@ -775,11 +1000,11 @@ class MainWindow(ctk.CTk):
 
     def _update_min_interval(self, val: float) -> None:
         v = int(val)
-        self.min_interval_val_lbl.configure(text=f"Min Delay: {v}s")
+        self.min_interval_val_lbl.configure(text=f"Minimum pause: {v} sec")
         # Ensure max >= min
         if self.max_slider.get() < v:
             self.max_slider.set(v + 5)
-            self.max_interval_val_lbl.configure(text=f"Max Delay: {v + 5}s")
+            self.max_interval_val_lbl.configure(text=f"Maximum pause: {v + 5} sec")
         self._on_settings_change()
 
     def _update_max_interval(self, val: float) -> None:
@@ -788,18 +1013,18 @@ class MainWindow(ctk.CTk):
         if v < self.min_slider.get():
             v = int(self.min_slider.get()) + 5
             self.max_slider.set(v)
-        self.max_interval_val_lbl.configure(text=f"Max Delay: {v}s")
+        self.max_interval_val_lbl.configure(text=f"Maximum pause: {v} sec")
         self._on_settings_change()
 
     def _update_cooldown(self, val: float) -> None:
-        self.cooldown_val_lbl.configure(text=f"Inactivity Cooldown: {val:.1f}s")
+        self.cooldown_val_lbl.configure(text=f"Wait before resuming: {val:.1f} sec")
         self._on_settings_change()
 
     def _update_scheduler_durations(self) -> None:
         w = int(self.work_dur_slider.get())
         b = int(self.break_dur_slider.get())
-        self.work_dur_lbl.configure(text=f"Work Duration: {w} minutes")
-        self.break_dur_lbl.configure(text=f"Break Duration: {b} minutes")
+        self.work_dur_lbl.configure(text=f"Focus time: {w} minutes")
+        self.break_dur_lbl.configure(text=f"Rest time: {b} minutes")
         self._on_settings_change()
 
     def _on_settings_change(self) -> None:
@@ -818,18 +1043,12 @@ class MainWindow(ctk.CTk):
         self.config.set("start_minimized", bool(self.minimized_switch.get()))
         self.config.set("close_to_tray", bool(self.close_to_tray_switch.get()))
 
-        # Update dashboard metrics
-        self.metric_mode_val.configure(
-            text="Natural Bezier"
-            if self.mode_var.get() == "natural"
-            else "Micro-Jitter"
-            if self.mode_var.get() == "jitter"
-            else "Keep-Alive Only"
-        )
-        self.metric_interval_val.configure(
-            text=f"{int(self.min_slider.get())}s - {int(self.max_slider.get())}s"
-        )
-        self.metric_pause_val.configure(text="Active" if self.auto_pause_switch.get() else "Off")
+        selected_mode = {
+            "natural": "Glide",
+            "jitter": "Nudge",
+            "keepalive_only": "Native",
+        }.get(self.mode_var.get(), "Glide")
+        self._update_mode_buttons(selected_mode)
 
         # Update active scheduler
         self.engine.scheduler.update_durations(
@@ -845,12 +1064,15 @@ class MainWindow(ctk.CTk):
     def _copy_hwid(self) -> None:
         self.clipboard_clear()
         self.clipboard_append(self.licensing.machine_id)
-        self._append_log(f"[{time.strftime('%H:%M:%S')}] Copied Machine HWID to clipboard.\n")
+        self._append_log(f"[{time.strftime('%H:%M:%S')}] Device ID copied.\n")
 
     def _on_activate_license(self) -> None:
         key = self.license_entry.get().strip()
         if not key:
-            self.license_feedback_lbl.configure(text="Please enter a license key.", text_color=THEME["accent_red"])
+            self.license_feedback_lbl.configure(
+                text="Please enter a license key.",
+                text_color=THEME["accent_rose_text"],
+            )
             return
 
         self.activate_btn.configure(text="Activating...", state="disabled")
@@ -863,15 +1085,20 @@ class MainWindow(ctk.CTk):
 
     def _handle_activation_result(self, success: bool, msg: str) -> None:
         self.activate_btn.configure(text="Activate", state="normal")
-        color = THEME["accent_green"] if success else THEME["accent_red"]
+        color = THEME["accent_sage_text"] if success else THEME["accent_rose_text"]
         self.license_feedback_lbl.configure(text=msg, text_color=color)
 
     def _on_license_status_updated(self, tier: LicenseTier, msg: str) -> None:
+        plan_text = (
+            "Licensed"
+            if self.licensing.is_pro
+            else f"{self.licensing.days_remaining} days left in your free trial"
+        )
         self.plan_indicator.configure(
-            text="PRO LIFETIME" if self.licensing.is_pro else f"FREE TRIAL ({self.licensing.days_remaining}d)"
+            text=plan_text
         )
         self.license_tier_badge.configure(
-            text="PRO LIFETIME" if self.licensing.is_pro else f"FREE TRIAL ({self.licensing.days_remaining} Days Remaining)",
+            text=plan_text,
             fg_color=THEME["badge_active_bg"] if self.licensing.is_pro else THEME["badge_break_bg"],
             text_color=THEME["badge_active_text"] if self.licensing.is_pro else THEME["badge_break_text"],
         )

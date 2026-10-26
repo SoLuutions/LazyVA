@@ -42,6 +42,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "launch_on_startup": False,
     "close_to_tray": True,        # Closing settings window hides to system tray
     "check_updates_on_launch": True,
+    "theme": "system",            # Appearance mode: system, day, or night
 
     
     # SaaS Licensing details

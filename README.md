@@ -18,6 +18,7 @@ Unlike crude mouse jigglers that trigger antivirus alarms or robotic straight-li
 - **Global Hotkeys**: Instant control with **F9** (Start), **F10** (Stop), and **F11** (Exit).
 - **System Tray Integration**: Dynamic status badge icons (Green for Active, Amber for Break, Gray for Idle) and quick context menu.
 - **SaaS Licensing & Feature Gating**: Machine hardware fingerprinting (HWID), 7-day free trial, and encrypted offline token verification.
+- **Soft Meadow / Twilight Meadow Themes**: Calm cream-and-sage day colors and a soft periwinkle night palette, with a saved theme toggle.
 
 ---
 
@@ -39,8 +40,8 @@ LazyVA/
 │   │   ├── manager.py          # SaaS licensing & offline grace manager
 │   │   └── validator.py        # Cryptographic HMAC token verification
 │   ├── ui/
-│   │   ├── main_window.py      # CustomTkinter modern dark dashboard GUI
-│   │   ├── theme.py            # Deep charcoal/cyan color tokens
+│   │   ├── main_window.py      # CustomTkinter Soft Meadow / Twilight Meadow UI
+│   │   ├── theme.py            # Shared day/night pastel color tokens
 │   │   └── tray.py             # Pystray notification area integration
 │   └── updater/
 │       └── auto_updater.py     # Background version checker & silent updater
@@ -98,6 +99,16 @@ Double-click `packaging\build.bat` or run:
 ```cmd
 packaging\build.bat
 ```
+The script works from any current directory and rebuilds the output from the
+checked-out source. Close any running LazyVA copy, including one in the system
+tray, before rebuilding so Windows can replace its files. To preview the build
+before installing it, run
+`dist\LazyVA\LazyVA.exe` directly; an existing Start Menu shortcut may still
+launch a previously installed copy.
+
+The app follows the Windows appearance by default. Use the theme button in the
+header to switch between Soft Meadow and Twilight Meadow; your choice is saved
+for the next launch.
 
 ### Manual Build Steps:
 1. **Compile Standalone Executable**:

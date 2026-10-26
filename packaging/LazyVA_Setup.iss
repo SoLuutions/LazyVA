@@ -27,7 +27,7 @@ DisableProgramGroupPage=yes
 ; Output file settings
 OutputDir=..\dist
 OutputBaseFilename=LazyVA_Setup_v{#MyAppVersion}
-SetupIconFile=..\assets\icon.ico
+SetupIconFile=..\assets\icon_night.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2/ultra64
 SolidCompression=yes

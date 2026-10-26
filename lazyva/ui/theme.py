@@ -1,48 +1,57 @@
-"""
-Modern Dark SaaS Theme and Color Palette for LazyVA.
-Engineered for a high-end, premium aesthetic (similar to Raycast, Linear, Discord).
-"""
+"""Soft Meadow and Twilight Meadow color tokens for the LazyVA interface."""
 
-from typing import Dict
+import sys
+from typing import Dict, Tuple
 
-THEME: Dict[str, str] = {
-    # Backgrounds & Surfaces
-    "bg_dark": "#0B0D14",            # Deepest obsidian base
-    "surface": "#131722",            # Card and panel surface
-    "surface_elevated": "#1A1F2E",   # Hovered or elevated container
-    "surface_border": "#262D42",     # Subtle crisp border outline
-    "surface_border_focus": "#3B82F6",
-    
-    # Brand & Accents
-    "primary": "#3B82F6",            # Vibrant electric blue
-    "primary_hover": "#2563EB",
-    "accent_cyan": "#06B6D4",        # Neon cyan pulse
-    "accent_cyan_glow": "#0891B2",
-    "accent_green": "#10B981",       # Active running green
-    "accent_green_hover": "#059669",
-    "accent_amber": "#F59E0B",       # Scheduled break amber
-    "accent_red": "#EF4444",         # Stop / Danger red
-    "accent_red_hover": "#DC2626",
-    
-    # Typography
-    "text_primary": "#F8FAFC",       # High-contrast crisp white
-    "text_secondary": "#94A3B8",     # Muted slate secondary
-    "text_muted": "#64748B",         # Dim subtle label
-    "text_inverse": "#0B0D14",
-    
-    # Status badges
-    "badge_active_bg": "#064E3B",
-    "badge_active_text": "#34D399",
-    "badge_break_bg": "#78350F",
-    "badge_break_text": "#FBBF24",
-    "badge_idle_bg": "#1E293B",
-    "badge_idle_text": "#94A3B8",
+ColorPair = Tuple[str, str]
+
+THEME: Dict[str, ColorPair] = {
+    "bg_dark": ("#FBF7F0", "#5B5878"),
+    "surface": ("#FFFDF8", "#6A6788"),
+    "surface_elevated": ("#F3EEE3", "#777495"),
+    "surface_border": ("#E4DCCB", "#8582A3"),
+    "surface_border_focus": ("#6FA586", "#8FC4A4"),
+    "primary": ("#A7D3B8", "#B5DDC4"),
+    "primary_hover": ("#6FA586", "#8FC4A4"),
+    "accent_cyan": ("#BFD8EA", "#C4DDF0"),
+    "accent_cyan_glow": ("#BFD8EA", "#C4DDF0"),
+    "accent_green": ("#A7D3B8", "#B5DDC4"),
+    "accent_green_hover": ("#6FA586", "#8FC4A4"),
+    "accent_amber": ("#F6C99B", "#F8D4A8"),
+    "accent_red": ("#E9AFAE", "#F2BDC0"),
+    "accent_red_hover": ("#D99494", "#E5A5AA"),
+    "text_primary": ("#3D3A35", "#F7F2EA"),
+    "text_secondary": ("#6F6A60", "#F0ECF5"),
+    "text_muted": ("#706B61", "#DED9E8"),
+    "text_inverse": ("#2F3B33", "#2E2B40"),
+    "badge_active_bg": ("#A7D3B8", "#B5DDC4"),
+    "badge_active_text": ("#2F3B33", "#2E2B40"),
+    "badge_break_bg": ("#F6C99B", "#F8D4A8"),
+    "badge_break_text": ("#2F3B33", "#2E2B40"),
+    "badge_idle_bg": ("#D8D1C2", "#CFCADB"),
+    "badge_idle_text": ("#3D3A35", "#2E2B40"),
+    "accent_sage": ("#A7D3B8", "#B5DDC4"),
+    "accent_sage_deep": ("#6FA586", "#8FC4A4"),
+    "accent_sage_text": ("#4B725A", "#E2F3E7"),
+    "accent_apricot": ("#F6C99B", "#F8D4A8"),
+    "accent_apricot_text": ("#855C35", "#FFF0D7"),
+    "accent_oat": ("#D8D1C2", "#CFCADB"),
+    "accent_lavender": ("#CBBFE6", "#D3C8F0"),
+    "accent_sky": ("#BFD8EA", "#C4DDF0"),
+    "accent_rose": ("#E9AFAE", "#F2BDC0"),
+    "accent_rose_text": ("#9B4F4D", "#FFE9EA"),
+    "on_accent": ("#2F3B33", "#2E2B40"),
 }
 
+RADIUS = {"card": 20, "input": 14, "pill": 999}
+SPACE = {"xs": 4, "sm": 8, "md": 16, "lg": 24, "xl": 32}
+FONT_FAMILY = "Segoe UI" if sys.platform == "win32" else "sans-serif"
+DISPLAY_FONT_FAMILY = "Georgia"
+
+
 def sys_is_windows() -> bool:
-    import sys
     return sys.platform == "win32"
 
 
-FONT_FAMILY = "Segoe UI" if sys_is_windows() else "sans-serif"
-
+def resolve_color(color: ColorPair, appearance: str) -> str:
+    return color[1] if appearance.lower() == "dark" else color[0]

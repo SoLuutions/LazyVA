@@ -12,6 +12,8 @@ from typing import Callable, Optional
 
 from PIL import Image, ImageDraw
 
+from lazyva.ui.theme import THEME, resolve_color
+
 try:
     import pystray
     HAS_PYSTRAY = True
@@ -22,29 +24,32 @@ except Exception:
 from lazyva import __app_name__, __version__
 
 
-def create_tray_icon_image(status: str = "idle") -> Image.Image:
-    """
-    Renders dynamic 64x64 status icons for the Windows notification area.
-    status options: 'active', 'break', 'idle'
-    """
+def create_tray_icon_image(status: str = "idle", theme: str = "day") -> Image.Image:
+    """Renders a meadow-colored leaf icon with a distinct status marker."""
+    appearance = "dark" if theme == "night" else "light"
+    color = lambda token: resolve_color(THEME[token], appearance)
+    background = color("bg_dark")
     img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
+    draw.rounded_rectangle(
+        (4, 4, 60, 60),
+        radius=17,
+        fill=background,
+        outline=color("surface_border"),
+        width=2,
+    )
+    draw.ellipse((15, 11, 46, 46), fill=color("accent_sage"))
+    draw.polygon(((19, 39), (42, 17), (38, 43)), fill=color("accent_sage_deep"))
+    draw.line((21, 41, 41, 20), fill=color("on_accent"), width=2)
 
-    # Base circular background
-    draw.ellipse((4, 4, 60, 60), fill=(18, 22, 33, 240), outline=(43, 49, 69, 255), width=2)
-
-    if status == "active":
-        # Glowing active green dot
-        draw.ellipse((16, 16, 48, 48), fill=(16, 185, 129, 255))
-        draw.ellipse((24, 24, 40, 40), fill=(255, 255, 255, 220))
-    elif status == "break":
-        # Scheduled break amber dot
-        draw.ellipse((16, 16, 48, 48), fill=(245, 158, 11, 255))
-        draw.ellipse((24, 24, 40, 40), fill=(255, 255, 255, 220))
-    else:  # 'idle'
-        # Sleek idle cyan ring
-        draw.ellipse((18, 18, 46, 46), outline=(6, 182, 212, 230), width=4)
-        draw.ellipse((27, 27, 37, 37), fill=(148, 163, 184, 200))
+    status_color = {
+        "active": color("accent_sage"),
+        "break": color("accent_apricot"),
+        "idle": color("accent_oat"),
+    }.get(status, color("accent_oat"))
+    draw.ellipse((42, 42, 58, 58), fill=status_color, outline=background, width=2)
+    if status == "idle":
+        draw.ellipse((46, 46, 54, 54), outline=color("on_accent"), width=1)
 
     return img
 
@@ -56,15 +61,15 @@ class TrayIconManager:
         self,
         on_toggle_start_stop: Callable[[], None],
         on_show_window: Callable[[], None],
-        on_open_settings: Callable[[], None],
-        on_check_updates: Callable[[], None],
         on_quit_app: Callable[[], None],
+        on_toggle_theme: Callable[[], None],
+        get_theme: Callable[[], str],
     ):
         self.on_toggle_start_stop = on_toggle_start_stop
         self.on_show_window = on_show_window
-        self.on_open_settings = on_open_settings
-        self.on_check_updates = on_check_updates
         self.on_quit_app = on_quit_app
+        self.on_toggle_theme = on_toggle_theme
+        self.get_theme = get_theme
 
         self._tray_icon: Optional[pystray.Icon] = None
         self._thread: Optional[threading.Thread] = None
@@ -108,7 +113,9 @@ class TrayIconManager:
 
         if self._tray_icon is not None:
             try:
-                self._tray_icon.icon = create_tray_icon_image(self._current_status)
+                self._tray_icon.icon = create_tray_icon_image(
+                    self._current_status, self.get_theme()
+                )
                 self._tray_icon.menu = self._build_menu()
                 self._tray_icon.title = (
                     f"LazyVA - {'Active' if is_active else 'Idle'}"
@@ -122,22 +129,24 @@ class TrayIconManager:
     def _build_menu(self) -> pystray.Menu:
         """Builds context menu entries for tray icon."""
         status_text = (
-            "Status: Active (Working)"
+            "Awake and steady"
             if self._is_engine_active and self._current_status == "active"
-            else "Status: On Break (Paused)"
+            else "Rest time"
             if self._current_status == "break"
-            else "Status: Stopped (Idle)"
+            else "Resting"
         )
 
-        toggle_label = "Stop (F10)" if self._is_engine_active else "Start (F9)"
+        toggle_label = "Stop" if self._is_engine_active else "Start"
+        theme_label = "Switch to day" if self.get_theme() == "night" else "Switch to night"
 
         return pystray.Menu(
             pystray.MenuItem(status_text, None, enabled=False),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(toggle_label, lambda icon, item: self.on_toggle_start_stop(), default=True),
-            pystray.MenuItem("Settings…", lambda icon, item: self.on_open_settings()),
+            pystray.MenuItem("Open LazyVA", lambda icon, item: self.on_show_window()),
+            pystray.MenuItem(theme_label, lambda icon, item: self.on_toggle_theme()),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Exit (F11)", lambda icon, item: self.on_quit_app()),
+            pystray.MenuItem("Quit", lambda icon, item: self.on_quit_app()),
         )
 
 
@@ -146,7 +155,7 @@ class TrayIconManager:
         try:
             self._tray_icon = pystray.Icon(
                 __app_name__,
-                create_tray_icon_image(self._current_status),
+                create_tray_icon_image(self._current_status, self.get_theme()),
                 f"{__app_name__} - Activity Assistant",
                 menu=self._build_menu(),
             )

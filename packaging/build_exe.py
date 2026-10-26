@@ -26,6 +26,26 @@ def build():
     parser.add_argument("--name", default="LazyVA", help="Binary name")
     cli_args = parser.parse_args()
 
+    app_dist_path = dist_dir / (
+        f"{cli_args.name}.exe" if cli_args.onefile else cli_args.name
+    )
+    app_build_dir = build_dir / cli_args.name
+    for output_path in (app_dist_path, app_build_dir):
+        try:
+            if output_path.is_dir():
+                shutil.rmtree(output_path)
+            elif output_path.exists():
+                output_path.unlink()
+        except PermissionError as error:
+            print(f"\n[ERROR] Cannot remove previous build output: {output_path}")
+            if error.filename:
+                print(f"Windows is still using: {error.filename}")
+            print(
+                "Close any running LazyVA instance, including its system-tray "
+                "copy, then run the build again."
+            )
+            raise SystemExit(1) from None
+
     # Detect CustomTkinter location to bundle assets
     import customtkinter
     ctk_path = Path(customtkinter.__file__).parent
@@ -41,6 +61,9 @@ def build():
         "--noconsole",
         "--name", cli_args.name,
         "--onefile" if cli_args.onefile else "--onedir",
+        "--distpath", str(dist_dir),
+        "--workpath", str(build_dir),
+        "--specpath", str(build_dir),
         "--icon", str(icon_ico),
         # Bundle assets folder
         "--add-data", f"{root / 'assets'}{sep}assets",
@@ -86,7 +109,7 @@ def build():
 
     if result.returncode == 0:
         print("\n[SUCCESS] LazyVA build completed successfully!")
-        print(f"Output files located in: {dist_dir / 'LazyVA'}")
+        print(f"Output files located in: {app_dist_path}")
     else:
         print("\n[ERROR] PyInstaller build failed with exit code:", result.returncode)
         sys.exit(result.returncode)

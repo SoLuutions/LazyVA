@@ -38,9 +38,9 @@ class LazyVAApplication:
         self.tray = TrayIconManager(
             on_toggle_start_stop=self.toggle_start_stop,
             on_show_window=self.show_window,
-            on_open_settings=self.open_settings,
-            on_check_updates=self.check_updates,
             on_quit_app=self.quit_app,
+            on_toggle_theme=self.toggle_theme,
+            get_theme=self.current_theme,
         )
 
         # 3. Setup Hotkeys
@@ -74,7 +74,9 @@ class LazyVAApplication:
             config=self.config,
             on_request_hide=self.hide_window,
             on_request_quit=self.quit_app,
+            on_theme_change=self._refresh_tray_theme,
         )
+        self._refresh_tray_theme()
 
         # Background update check if enabled
         if self.config.get("check_updates_on_launch", True):
@@ -132,6 +134,26 @@ class LazyVAApplication:
         self.show_window()
         if self.window is not None:
             self.window.after(50, lambda: self.window._select_tab("engine"))
+
+    def toggle_theme(self) -> None:
+        """Switches between the day and night appearances from the system tray."""
+        if self.window is not None:
+            self.window.after(0, self.window.toggle_theme)
+            return
+        current = self.config.get("theme", "system")
+        self.config.set("theme", "day" if current == "night" else "night")
+
+    def current_theme(self) -> str:
+        if self.window is not None:
+            return self.window.current_theme()
+        current = self.config.get("theme", "system")
+        return current if current in {"day", "night"} else "day"
+
+    def _refresh_tray_theme(self) -> None:
+        self.tray.update_status(
+            is_active=self.engine.is_running,
+            in_break=self.engine.scheduler.is_in_break,
+        )
 
     def check_updates(self) -> None:
         """Triggers manual update check."""
