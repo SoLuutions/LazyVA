@@ -31,6 +31,13 @@ from .theme import (
 # Configure CustomTkinter defaults
 ctk.set_default_color_theme("blue")
 
+EVENT_MODE_LABELS = {
+    "move": "Movement only",
+    "click": "Right-click only",
+    "scroll": "Scroll only",
+    "mixed": "Mix movement, right-click, and scroll",
+}
+
 
 class MainWindow(ctk.CTk):
     """Primary application window for LazyVA."""
@@ -523,51 +530,56 @@ class MainWindow(ctk.CTk):
             )
             d_lbl.pack(anchor="w", padx=(28, 0))
 
-        interval_card = self._create_card(view, "Movement pace")
+        interval_card = self._create_card(view, "Event frequency")
 
-        self.min_interval_val_lbl = ctk.CTkLabel(
+        interval = int(self.config.get("activity_interval_seconds", 60))
+        self.activity_interval_val_lbl = ctk.CTkLabel(
             interval_card,
-            text=f"Minimum pause: {self.config.get('interval_min')} sec",
+            text=self._format_activity_interval(interval),
             font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
             text_color=THEME["text_primary"],
         )
-        self.min_interval_val_lbl.pack(anchor="w", padx=16, pady=(8, 0))
+        self.activity_interval_val_lbl.pack(anchor="w", padx=16, pady=(8, 0))
 
-        self.min_slider = ctk.CTkSlider(
+        self.activity_interval_slider = ctk.CTkSlider(
             interval_card,
             from_=5,
-            to=60,
-            number_of_steps=55,
-            command=self._update_min_interval,
+            to=300,
+            number_of_steps=59,
+            command=self._update_activity_interval,
             progress_color=THEME["accent_sage_deep"],
             button_color=THEME["accent_sage"],
             button_hover_color=THEME["accent_sage_deep"],
             fg_color=THEME["surface_elevated"],
         )
-        self.min_slider.set(self.config.get("interval_min", 15))
-        self.min_slider.pack(fill="x", padx=16, pady=(4, 12))
+        self.activity_interval_slider.set(interval)
+        self.activity_interval_slider.pack(fill="x", padx=16, pady=(4, 16))
 
-        self.max_interval_val_lbl = ctk.CTkLabel(
-            interval_card,
-            text=f"Maximum pause: {self.config.get('interval_max')} sec",
-            font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
-            text_color=THEME["text_primary"],
+        event_card = self._create_card(view, "Scheduled event")
+        current_event_mode = self.config.get("activity_event_mode", "move")
+        self.event_mode_var = ctk.StringVar(
+            value=EVENT_MODE_LABELS.get(current_event_mode, "Movement only")
         )
-        self.max_interval_val_lbl.pack(anchor="w", padx=16, pady=(4, 0))
-
-        self.max_slider = ctk.CTkSlider(
-            interval_card,
-            from_=15,
-            to=180,
-            number_of_steps=165,
-            command=self._update_max_interval,
-            progress_color=THEME["accent_sage_deep"],
-            button_color=THEME["accent_sage"],
-            button_hover_color=THEME["accent_sage_deep"],
-            fg_color=THEME["surface_elevated"],
+        self.event_mode_menu = ctk.CTkOptionMenu(
+            event_card,
+            values=list(EVENT_MODE_LABELS.values()),
+            variable=self.event_mode_var,
+            command=lambda _: self._on_settings_change(),
+            fg_color=THEME["accent_sage"],
+            button_color=THEME["accent_sage_deep"],
+            button_hover_color=THEME["primary_hover"],
+            text_color=THEME["on_accent"],
+            dropdown_fg_color=THEME["surface"],
+            dropdown_text_color=THEME["text_primary"],
+            dropdown_hover_color=THEME["surface_elevated"],
         )
-        self.max_slider.set(self.config.get("interval_max", 45))
-        self.max_slider.pack(fill="x", padx=16, pady=(4, 16))
+        self.event_mode_menu.pack(anchor="w", padx=16, pady=(12, 8))
+        ctk.CTkLabel(
+            event_card,
+            text="Click events send a right-click; scroll events scroll the active window.",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+            text_color=THEME["text_secondary"],
+        ).pack(anchor="w", padx=16, pady=(0, 12))
 
         pause_card = self._create_card(view, "When you move the mouse")
 
@@ -606,6 +618,27 @@ class MainWindow(ctk.CTk):
         )
         self.cooldown_slider.set(self.config.get("auto_pause_cooldown", 4.0))
         self.cooldown_slider.pack(fill="x", padx=16, pady=(4, 16))
+
+        window_events_card = self._create_card(view, "Optional Chrome tab event")
+        self.chrome_tab_switch = ctk.CTkSwitch(
+            window_events_card,
+            text="Allow Ctrl+Tab when Google Chrome is active",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13),
+            progress_color=THEME["accent_sage"],
+            button_color=THEME["surface"],
+            button_hover_color=THEME["surface_elevated"],
+            fg_color=THEME["surface_elevated"],
+            command=self._on_settings_change,
+        )
+        if self.config.get("chrome_tab_switch_enabled", False):
+            self.chrome_tab_switch.select()
+        self.chrome_tab_switch.pack(anchor="w", padx=16, pady=(4, 8))
+        ctk.CTkLabel(
+            window_events_card,
+            text="When enabled, this replaces the scheduled action only while Chrome is active.",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+            text_color=THEME["text_secondary"],
+        ).pack(anchor="w", padx=16, pady=(0, 12))
 
         return view
 
@@ -998,22 +1031,20 @@ class MainWindow(ctk.CTk):
 
         self.after(1000, _tick)
 
-    def _update_min_interval(self, val: float) -> None:
-        v = int(val)
-        self.min_interval_val_lbl.configure(text=f"Minimum pause: {v} sec")
-        # Ensure max >= min
-        if self.max_slider.get() < v:
-            self.max_slider.set(v + 5)
-            self.max_interval_val_lbl.configure(text=f"Maximum pause: {v + 5} sec")
-        self._on_settings_change()
+    @staticmethod
+    def _format_activity_interval(seconds: int) -> str:
+        if seconds % 60 == 0:
+            minutes = seconds // 60
+            unit = "minute" if minutes == 1 else "minutes"
+            return f"One event every {minutes} {unit}"
+        return f"One event every {seconds} seconds"
 
-    def _update_max_interval(self, val: float) -> None:
-        v = int(val)
-        # Ensure max >= min
-        if v < self.min_slider.get():
-            v = int(self.min_slider.get()) + 5
-            self.max_slider.set(v)
-        self.max_interval_val_lbl.configure(text=f"Maximum pause: {v} sec")
+    def _update_activity_interval(self, val: float) -> None:
+        interval = int(round(val / 5) * 5)
+        self.activity_interval_slider.set(interval)
+        self.activity_interval_val_lbl.configure(
+            text=self._format_activity_interval(interval)
+        )
         self._on_settings_change()
 
     def _update_cooldown(self, val: float) -> None:
@@ -1030,10 +1061,26 @@ class MainWindow(ctk.CTk):
     def _on_settings_change(self) -> None:
         """Saves current widget values to ConfigManager."""
         self.config.set("mode", self.mode_var.get())
-        self.config.set("interval_min", int(self.min_slider.get()))
-        self.config.set("interval_max", int(self.max_slider.get()))
+        interval = int(self.activity_interval_slider.get())
+        self.config.set("activity_interval_seconds", interval)
+        self.config.set("interval_min", interval)
+        self.config.set("interval_max", interval)
+        self.config.set(
+            "activity_event_mode",
+            next(
+                (
+                    event_mode
+                    for event_mode, label in EVENT_MODE_LABELS.items()
+                    if label == self.event_mode_var.get()
+                ),
+                "move",
+            ),
+        )
         self.config.set("auto_pause_on_user", bool(self.auto_pause_switch.get()))
         self.config.set("auto_pause_cooldown", round(self.cooldown_slider.get(), 1))
+        self.config.set(
+            "chrome_tab_switch_enabled", bool(self.chrome_tab_switch.get())
+        )
 
         self.config.set("enable_breaks", bool(self.enable_breaks_switch.get()))
         self.config.set("work_duration_minutes", int(self.work_dur_slider.get()))

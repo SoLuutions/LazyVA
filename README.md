@@ -9,16 +9,18 @@
 
 **LazyVA** is a modern, commercial-ready Windows desktop SaaS application designed to prevent unexpected system idle timeouts, keep displays active during long downloads or presentations, and maintain healthy, natural work-rest rhythms.
 
-Unlike crude mouse jigglers that trigger antivirus alarms or robotic straight-line detections, LazyVA uses:
-- **Cubic Bezier Glide**: Organic human-like mouse trajectories with natural ease-in/ease-out acceleration, subtle micro-tremors, and randomized paths.
-- **Micro-Jitter Nudge**: 1–4 pixel imperceptible movements for ultra-stealth operation.
-- **Native Windows OS Keep-Alive**: Direct `kernel32.SetThreadExecutionState` calls to prevent sleep and display timeout without moving the cursor at all.
+LazyVA provides:
+- **Native Windows OS Keep-Alive**: Direct `kernel32.SetThreadExecutionState` calls to prevent sleep and display timeout without moving the cursor.
+- **Optional Pointer Movement**: Cubic Bezier glide and micro-jitter modes are available when explicitly selected; native keep-awake is the default.
+- **Configurable Events**: Scheduled events can move the pointer, right-click, scroll, or cycle through those actions.
+- **Adjustable Frequency**: Scheduled events default to once per minute and can be adjusted in Movement settings.
 - **Auto-Pause on User Interaction**: Automatically yields when the user touches their mouse, avoiding pointer resistance.
 - **Smart Pomodoro Breaks**: Automated 25m work / 5m rest cycles with desktop status alerts.
 - **Global Hotkeys**: Instant control with **F9** (Start), **F10** (Stop), and **F11** (Exit).
+- **Optional Chrome Tab Event**: When enabled, LazyVA sends **Ctrl+Tab** only while Google Chrome is the foreground app, replacing that scheduled action. The event is off by default.
 - **System Tray Integration**: Dynamic status badge icons (Green for Active, Amber for Break, Gray for Idle) and quick context menu.
 - **SaaS Licensing & Feature Gating**: Machine hardware fingerprinting (HWID), 7-day free trial, and encrypted offline token verification.
-- **Soft Meadow / Twilight Meadow Themes**: Calm cream-and-sage day colors and a soft periwinkle night palette, with a saved theme toggle.
+- **Soft Meadow / Twilight Meadow Themes**: Day and night themes inspired by `#15370D`, `#728E6D`, `#E5CD82`, and `#FFF2B4`, with a saved theme toggle.
 
 ---
 
@@ -108,7 +110,12 @@ launch a previously installed copy.
 
 The app follows the Windows appearance by default. Use the theme button in the
 header to switch between Soft Meadow and Twilight Meadow; your choice is saved
-for the next launch.
+for the next launch. Adjust the scheduled action frequency under **Movement**
+from 5 seconds to 5 minutes; it defaults to one action per minute. Native
+keep-awake is the default mode. Scheduled event types can be selected in
+Movement settings; right-click and scroll events operate on the active window.
+The optional Chrome tab event is disabled by default and only operates while
+Chrome is the foreground application.
 
 ### Manual Build Steps:
 1. **Compile Standalone Executable**:

@@ -4,6 +4,7 @@ Coordinates mouse movements, Windows keep-alive signals, user detection, and bre
 """
 
 import ctypes
+import ctypes.wintypes
 import math
 import random
 import sys
@@ -84,6 +85,75 @@ def _set_cursor_pos(x: int, y: int) -> None:
             pass
 
 
+def _is_chrome_foreground() -> bool:
+    """Returns whether the active window belongs to Google Chrome."""
+    if sys.platform != "win32":
+        return False
+
+    user32 = ctypes.windll.user32
+    user32.GetForegroundWindow.restype = ctypes.wintypes.HWND
+    user32.GetWindowThreadProcessId.argtypes = [
+        ctypes.wintypes.HWND,
+        ctypes.POINTER(ctypes.wintypes.DWORD),
+    ]
+    user32.GetWindowThreadProcessId.restype = ctypes.wintypes.DWORD
+    process_id = ctypes.wintypes.DWORD()
+    window = user32.GetForegroundWindow()
+    if not window or not user32.GetWindowThreadProcessId(window, ctypes.byref(process_id)):
+        return False
+
+    kernel32 = ctypes.windll.kernel32
+    kernel32.OpenProcess.argtypes = [
+        ctypes.wintypes.DWORD,
+        ctypes.wintypes.BOOL,
+        ctypes.wintypes.DWORD,
+    ]
+    kernel32.OpenProcess.restype = ctypes.wintypes.HANDLE
+    kernel32.QueryFullProcessImageNameW.argtypes = [
+        ctypes.wintypes.HANDLE,
+        ctypes.wintypes.DWORD,
+        ctypes.wintypes.LPWSTR,
+        ctypes.POINTER(ctypes.wintypes.DWORD),
+    ]
+    kernel32.QueryFullProcessImageNameW.restype = ctypes.wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [ctypes.wintypes.HANDLE]
+    kernel32.CloseHandle.restype = ctypes.wintypes.BOOL
+    process = kernel32.OpenProcess(0x1000, False, process_id.value)
+    if not process:
+        return False
+
+    try:
+        image_path = ctypes.create_unicode_buffer(32768)
+        path_size = ctypes.wintypes.DWORD(len(image_path))
+        if not kernel32.QueryFullProcessImageNameW(
+            process, 0, image_path, ctypes.byref(path_size)
+        ):
+            return False
+        return image_path.value.lower().endswith("\\chrome.exe")
+    finally:
+        kernel32.CloseHandle(process)
+
+
+def _send_input_event(event: str) -> Tuple[bool, str]:
+    """Performs one configured pointer event through PyAutoGUI."""
+    if not HAS_PYAUTOGUI:
+        return False, f"{event} skipped: PyAutoGUI is unavailable."
+
+    try:
+        if event == "click":
+            pyautogui.click(button="right")
+            return True, "Performed a right-click."
+        if event == "scroll":
+            amount = random.choice([-3, -2, -1, 1, 2, 3])
+            pyautogui.scroll(amount)
+            direction = "up" if amount > 0 else "down"
+            return True, f"Scrolled {direction} ({abs(amount)} steps)."
+    except Exception as error:
+        return False, f"{event} failed: {error}"
+
+    return False, f"Unknown activity event: {event}"
+
+
 class ActivityEngine:
     """
     Main background simulation engine.
@@ -108,6 +178,7 @@ class ActivityEngine:
         self._last_user_activity = 0.0
         self._last_engine_action_pos = (0, 0)
         self._total_actions_performed = 0
+        self._activity_count = 0
 
         # UI Callbacks
         self.on_state_change: Optional[Callable[[bool, SchedulerState], None]] = None
@@ -124,6 +195,7 @@ class ActivityEngine:
 
         self._running = True
         self._stop_event.clear()
+        self._activity_count = 0
 
         # Update scheduler parameters from current config
         self.scheduler.update_durations(
@@ -171,9 +243,9 @@ class ActivityEngine:
 
     def _worker_loop(self) -> None:
         """Main periodic action loop."""
-        # Initial cooldown
-        time.sleep(1.0)
+        self._stop_event.wait(1.0)
         last_action_time = time.time()
+        next_interval = self._next_action_interval()
 
         while self._running and not self._stop_event.is_set():
             # Advance scheduler tick
@@ -187,9 +259,6 @@ class ActivityEngine:
                 continue
 
             now = time.time()
-            interval_min = float(self.config.get("interval_min", 15))
-            interval_max = float(self.config.get("interval_max", 45))
-            next_interval = random.uniform(interval_min, interval_max)
 
             # Check if auto-pause on user interaction is enabled
             if self.config.get("auto_pause_on_user", True):
@@ -210,11 +279,73 @@ class ActivityEngine:
 
             # Time to trigger activity
             if (now - last_action_time) >= next_interval:
-                self._perform_activity()
+                self._perform_scheduled_activity()
                 last_action_time = time.time()
+                next_interval = self._next_action_interval()
 
             # Responsive sleep in small slices so stopping is instantaneous
             self._stop_event.wait(0.5)
+
+    def _next_action_interval(self) -> float:
+        return min(
+            300.0,
+            max(5.0, float(self.config.get("activity_interval_seconds", 60))),
+        )
+
+    def _perform_scheduled_activity(self) -> None:
+        """Runs one scheduled action or prompts the user for a manual action."""
+        self._activity_count += 1
+        if (
+            self.config.get("chrome_tab_switch_enabled", False)
+            and _is_chrome_foreground()
+        ):
+            self._perform_chrome_tab_switch()
+            return
+
+        event_mode = self.config.get("activity_event_mode", "move")
+        event_cycle = {
+            "move": ("move",),
+            "click": ("click",),
+            "scroll": ("scroll",),
+            "mixed": ("move", "click", "scroll"),
+        }.get(event_mode, ("move",))
+        event = event_cycle[(self._activity_count - 1) % len(event_cycle)]
+
+        if event == "move":
+            self._perform_activity()
+            return
+
+        success, message = _send_input_event(event)
+        if success:
+            self._total_actions_performed += 1
+            self.keepalive.pulse_activity()
+        else:
+            print(f"[LazyVA] {message}")
+        if self.on_activity_pulse:
+            self.on_activity_pulse(message)
+
+    def _perform_chrome_tab_switch(self) -> None:
+        """Switches one tab in Chrome without performing another activity."""
+        if not HAS_PYAUTOGUI:
+            message = "Chrome tab switch skipped: PyAutoGUI is unavailable."
+            print(f"[LazyVA] {message}")
+            if self.on_activity_pulse:
+                self.on_activity_pulse(message)
+            return
+
+        try:
+            pyautogui.hotkey("ctrl", "tab")
+        except Exception as error:
+            message = f"Chrome tab switch failed: {error}"
+            print(f"[LazyVA] {message}")
+            if self.on_activity_pulse:
+                self.on_activity_pulse(message)
+            return
+
+        self._total_actions_performed += 1
+        self.keepalive.pulse_activity()
+        if self.on_activity_pulse:
+            self.on_activity_pulse("Switched to the next Chrome tab (Ctrl+Tab).")
 
     def _perform_activity(self) -> None:
         """Executes one simulation action based on chosen mode."""

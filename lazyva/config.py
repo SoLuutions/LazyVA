@@ -11,16 +11,19 @@ from pathlib import Path
 from typing import Any, Dict
 
 DEFAULT_SETTINGS: Dict[str, Any] = {
-    # Activity Mode: 'natural' (human-like Bezier curve), 'jitter' (micro nudge), 'keepalive_only' (Windows API only)
-    "mode": "natural",
+    # Native Windows keep-awake is the default; pointer movement is opt-in.
+    "mode": "keepalive_only",
     
-    # Timing intervals in seconds
-    "interval_min": 15,
-    "interval_max": 45,
+    # Scheduled event cadence in seconds
+    "activity_interval_seconds": 60,
+    "activity_event_mode": "move",
+    "interval_min": 60,
+    "interval_max": 60,
     
     # Movement parameters
     "jitter_radius": 30,
     "glide_speed": 1.0,           # Multiplier for movement speed
+    "chrome_tab_switch_enabled": False,
     
     # Auto-pause when user physically moves the mouse
     "auto_pause_on_user": True,
